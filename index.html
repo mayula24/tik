@@ -218,6 +218,10 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
         <div class="chips" id="mrole"><button class="f" data-v="admin">מנהל</button><button class="f on" data-v="reporter">מדווח</button><button class="f" data-v="viewer">צפייה בלבד</button></div>
         <button class="btn" id="madd">הוספה</button>
         <p class="hint" id="mmsg" role="status"></p>
+        <button class="btn alt" id="minvite">שליחת קישור לאפליקציה</button>
+        <p class="hint" style="margin:6px 0 0">פותח את חלון השיתוף של הטלפון (וואטסאפ, הודעה, מייל) עם הודעה מוכנה. אם אין חלון שיתוף, ההודעה מועתקת.</p>
+        <pre class="out" id="minvite-txt" hidden></pre>
+        <p class="hint" id="minvite-msg" role="status"></p>
 
         <div class="sec">שם התיק</div>
         <div class="row2"><input type="text" id="case-input" autocomplete="off" placeholder="השם שיופיע בראש המסך" aria-label="שם התיק"><button class="btn" id="case-save">שמירה</button></div>
@@ -477,6 +481,20 @@ $('madd').onclick = async () => {
   catch (e) { msg.textContent = 'ההוספה נכשלה. רק מנהל יכול להוסיף משתמשים.'; }
 };
 $('case-save').onclick = async () => { const v = $('case-input').value.trim().slice(0, 60); try { await B.set('settings', 'case', { name: v }); $('case-msg').textContent = 'השם נשמר.'; } catch (e) { $('case-msg').textContent = 'השמירה נכשלה.'; } };
+
+/* ---------- invite link ---------- */
+function inviteText() {
+  const url = location.origin + location.pathname.replace(/index\.html$/, '');
+  return 'הוספתי אותך לתיק הרפואי' + (caseName ? ' של ' + caseName : '') + '.\n' + url + '\n\n'
+    + 'נכנסים עם "כניסה עם Google", עם חשבון ה-Gmail שאליו נשלחה ההזמנה הזאת.\n'
+    + 'באייפון: לפתוח ב-Safari, ללחוץ שתף ואז "הוספה למסך הבית", כדי שזה ייפתח כמו אפליקציה.';
+}
+$('minvite').onclick = async () => {
+  const t = inviteText(), msg = $('minvite-msg'); msg.textContent = ''; $('minvite-txt').hidden = true;
+  if (navigator.share) { try { await navigator.share({ text: t }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+  try { await navigator.clipboard.writeText(t); msg.textContent = 'ההודעה הועתקה. אפשר להדביק אותה בוואטסאפ.'; }
+  catch (e) { const o = $('minvite-txt'); o.textContent = t; o.hidden = false; msg.textContent = 'לא הצלחתי להעתיק. אפשר לסמן את הטקסט ולהעתיק ידנית.'; }
+};
 
 /* ---------- import (admin) ---------- */
 $('imp-file').onchange = async ev => {
