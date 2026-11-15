@@ -203,6 +203,7 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
       <button class="btn" id="dupload" hidden>העלאת המסמכים</button>
       <p class="hint" id="dmsg" role="status"></p>
       <div class="sec">המסמכים בתיק</div>
+      <div class="chips" id="dfilter" role="group" aria-label="סינון לפי סוג"></div>
       <div id="dlist"></div>
     </section>
 
@@ -528,7 +529,7 @@ async function importExtract(x) {
   for (const t of x.tasks || []) {
     if (!t || !t.id || !t.text) continue;
     const old = tasks.find(z => z.id === t.id), src = (x.docs || []).find(e => e.key === t.src) || {};
-    await B.set('tasks', String(t.id), { text: t.text, quote: t.quote || '', due: t.due || '', flag: !!t.flag, srcKey: t.src || '', srcDoc: map[t.src] || '',
+    await B.set('tasks', String(t.id), { appt: t.appt || '', apptTitle: t.apptTitle || '', apptNote: t.apptNote || '', text: t.text, quote: t.quote || '', due: t.due || '', flag: !!t.flag, srcKey: t.src || '', srcDoc: map[t.src] || '',
       srcTitle: src.unit || '', srcDate: src.docDate || '', status: old ? old.status : (t.status === 'done' ? 'done' : 'open'), doneBy: old ? (old.doneBy || '') : '', at: old ? old.at : iso(new Date()) }); nt++;
   }
   return 'עודכנו ' + linked + ' מסמכים שכבר היו בתיק' + (created ? ', ונוספו ' + created + ' שהקובץ שלהם עוד לא הועלה' : '') + '. ' + nt + ' משימות בלשונית "לטיפול".';
@@ -540,9 +541,10 @@ function renderTasks() {
   const open = tasks.filter(t => t.status !== 'done'), done = tasks.filter(t => t.status === 'done');
   const byDue = (a, b) => (a.due || '0').localeCompare(b.due || '0');
   const groups = [
-    ['לבירור', open.filter(t => t.flag)],
-    ['פתוח עכשיו', open.filter(t => !t.flag && (!t.due || tsOf(t.due) <= soon)).sort(byDue)],
-    ['בהמשך', open.filter(t => !t.flag && t.due && tsOf(t.due) > soon).sort(byDue)],
+    ['תורים שנקבעו', open.filter(t => t.appt).sort((a, b) => a.appt.localeCompare(b.appt))],
+    ['לבירור', open.filter(t => t.flag && !t.appt)],
+    ['פתוח עכשיו', open.filter(t => !t.flag && !t.appt && (!t.due || tsOf(t.due) <= soon)).sort(byDue)],
+    ['בהמשך', open.filter(t => !t.flag && !t.appt && t.due && tsOf(t.due) > soon).sort(byDue)],
   ];
   groups.forEach(([name, list]) => { if (!list.length) return; L.appendChild(el('div', 'sec', name + ' · ' + list.length)); list.forEach(t => L.appendChild(taskCard(t, today))); });
   if (done.length) { const det = el('details', 'recs'); det.appendChild(el('summary', null, 'בוצע · ' + done.length)); done.forEach(t => det.appendChild(taskCard(t, today))); L.appendChild(det); }
@@ -553,16 +555,21 @@ function taskCard(t, today) {
   b.onclick = () => { b.disabled = true; B.update('tasks', t.id, t.status === 'done' ? { status: 'open', doneBy: '', doneAt: '' } : { status: 'done', doneBy: me.name || me.email, doneAt: iso(new Date()) }).catch(() => { b.disabled = false; }); };
   const tx = el('div', 'tx'); tx.appendChild(el('div', 'tt', t.text));
   const m = el('div', 'meta'); m.style.margin = '4px 0 0';
-  if (t.due) { const dd = new Date(t.due + 'T12:00'); m.appendChild(el('span', 'tag ' + (dd < today && t.status !== 'done' ? 't-d' : 't-o'), (dd < today ? 'היה אמור ב-' : 'בערך ב-') + dm(dd) + '.' + String(dd.getFullYear()).slice(2))); }
+  if (t.appt) { const ad = new Date(t.appt.length > 10 ? t.appt : t.appt + 'T12:00'), past = ad < today;
+    m.appendChild(el('span', 'tag ' + (past ? 't-w' : 't-c'), (past ? 'התור היה ב-' : 'נקבע תור: ') + dm(ad) + (t.appt.length > 10 ? ' ' + hm(ad) : '')));
+    if (t.apptTitle) m.appendChild(el('span', 'who', 'ביומן: ' + t.apptTitle)); }
+  else if (t.due) { const dd = new Date(t.due + 'T12:00'); m.appendChild(el('span', 'tag ' + (dd < today && t.status !== 'done' ? 't-d' : 't-o'), (dd < today ? 'היה אמור ב-' : 'בערך ב-') + dm(dd) + '.' + String(dd.getFullYear()).slice(2))); }
   if (t.flag) m.appendChild(el('span', 'tag t-w', 'סימון שלי לבירור, לא הוראה רפואית'));
   if (t.status === 'done' && t.doneBy) m.appendChild(el('span', 'who', 'סומן ע"י ' + t.doneBy));
   if (m.childNodes.length) tx.appendChild(m);
+  if (t.apptNote) tx.appendChild(el('p', 'q', t.apptNote));
   if (t.quote) tx.appendChild(el('p', 'q', 'במסמך: "' + t.quote + '"'));
   if (t.srcDoc) { const sd = t.srcDate ? new Date(t.srcDate + 'T12:00') : null; const a = el('button', 'mini', 'מקור: ' + (t.srcTitle || 'מסמך') + (sd ? ' · ' + dm(sd) + '.' + String(sd.getFullYear()).slice(2) : ''));
     a.style.margin = '2px 0 0'; a.onclick = () => goDoc(t.srcDoc); tx.appendChild(a); }
   c.appendChild(b); c.appendChild(tx); return c;
 }
 function goDoc(id) {
+  docFilter = 'all'; renderDocs();
   document.querySelector('.tab[data-v="docs"]').click();
   const c = document.getElementById('doc-' + id); if (!c) return;
   c.scrollIntoView({ block: 'center' }); c.classList.add('hl'); setTimeout(() => c.classList.remove('hl'), 2500);
@@ -710,10 +717,19 @@ async function deleteDoc(d, btn) {
   try { for (let i = 0; i < (d.parts || 0); i++) await B.delPath('documents/' + d.id + '/chunks/' + i); await B.del('documents', d.id); }
   catch (e) { btn.textContent = 'המחיקה נכשלה. נסו שוב'; }
 }
+let docFilter = 'all';
+function renderDocFilter() {
+  const F = $('dfilter'); F.innerHTML = ''; F.hidden = docs.length < 2;
+  const counts = {}; docs.forEach(d => { const k = DKINDS[d.kind] ? d.kind : 'other'; counts[k] = (counts[k] || 0) + 1; });
+  if (docFilter !== 'all' && !counts[docFilter]) docFilter = 'all';
+  [['all', 'הכל', docs.length]].concat(Object.keys(DKINDS).filter(k => counts[k]).map(k => [k, DKINDS[k], counts[k]])).forEach(([k, name, n]) => {
+    const b = el('button', 'f' + (k === docFilter ? ' on' : ''), name + ' · ' + n); b.setAttribute('aria-pressed', k === docFilter ? 'true' : 'false');
+    b.onclick = () => { docFilter = k; renderDocs(); }; F.appendChild(b); });
+}
 function renderDocs() {
-  const L = $('dlist'); L.innerHTML = '';
+  const L = $('dlist'); L.innerHTML = ''; renderDocFilter();
   if (!docs.length) { L.appendChild(el('div', 'empty', 'עוד אין מסמכים בתיק. המסמך הראשון שתעלו יופיע כאן, אצל כל מי שמורשה.')); return; }
-  docs.forEach(d => {
+  docs.filter(d => docFilter === 'all' || (DKINDS[d.kind] ? d.kind : 'other') === docFilter).forEach(d => {
     const c = el('div', 'card'), m = el('div', 'meta'), dd = d.docDate ? new Date(d.docDate + 'T12:00') : null; c.id = 'doc-' + d.id;
     m.appendChild(el('b', null, dd ? dm(dd) + '.' + String(dd.getFullYear()).slice(2) : 'הועלה ' + dm(new Date(d.docTs || Date.now()))));
     if (!dd) m.appendChild(el('span', 'tag t-w', 'תאריך המסמך יושלם'));
