@@ -84,6 +84,16 @@ pre.out{white-space:pre-wrap;font-family:inherit;font-size:13.5px;background:var
 input[type=email]{width:100%;font:inherit;font-size:16px;padding:11px 12px;border:1.5px solid var(--line);border-radius:12px;background:var(--paper);color:var(--ink);direction:ltr;text-align:left}
 input[type=file]{font:inherit;font-size:14px;max-width:100%}
 html,body{margin:0}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+label.btn{display:block;text-align:center}
+label.btn:focus-within{outline:2px solid var(--thread);outline-offset:2px}
+select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px solid var(--line);border-radius:12px;background:var(--paper);color:var(--ink)}
+.fname{font-size:13px;color:var(--soft);overflow-wrap:anywhere}
+.doc-t{font-weight:600;font-size:15.5px;overflow-wrap:anywhere}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid2>*{min-width:0}
+.openlink{display:inline-block;font-weight:600;color:var(--thread);padding:8px 0;margin-left:16px}
+.tab{font-size:12.5px}
 </style>
 </head>
 <body>
@@ -166,6 +176,18 @@ html,body{margin:0}
       <div id="log"></div>
     </section>
 
+    <section class="view" id="v-docs">
+      <div class="sec" style="margin-top:14px">הוספת מסמכים</div>
+      <p class="hint" style="margin:0 0 10px">פותחים את המסמך באפליקציה של כללית, לוחצים "שתף" ואז "שמירה בקבצים". אחר כך בוחרים אותו כאן. אפשר לבחור כמה מסמכים בבת אחת, וגם צילומים של מכתבים.</p>
+      <input type="file" id="dfile" class="sr-only" multiple accept="application/pdf,image/*">
+      <label class="btn" for="dfile" id="dpick">בחירת מסמכים</label>
+      <div id="dstage"></div>
+      <button class="btn" id="dupload" hidden>העלאת המסמכים</button>
+      <p class="hint" id="dmsg" role="status"></p>
+      <div class="sec">המסמכים בתיק</div>
+      <div id="dlist"></div>
+    </section>
+
     <section class="view" id="v-users">
       <div class="sec" style="margin-top:14px">משתמשים</div>
       <p class="hint" style="margin:0 0 10px">כל מי שברשימה רואה את כל המידע שבתיק.</p>
@@ -199,6 +221,7 @@ html,body{margin:0}
   <button class="tab on" data-v="report">דיווח</button>
   <button class="tab" data-v="summary">סיכום</button>
   <button class="tab" data-v="log">יומן</button>
+  <button class="tab" data-v="docs">מסמכים</button>
   <button class="tab" data-v="users">משתמשים</button>
 </div></nav>
 
@@ -215,7 +238,7 @@ const firebaseConfig = {
 const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
 
 let B = null, me = null, role = null, locked = true;
-let events = [], reports = [], members = [], caseName = '';
+let events = [], reports = [], members = [], docs = [], caseName = '';
 let sumHours = 24, sumText = '', editing = 0;
 const DRUGS = ['אקמול', 'נורופן', 'אופטלגין'];
 const ROLES = { admin: 'מנהל', reporter: 'מדווח', viewer: 'צפייה בלבד' };
@@ -231,7 +254,7 @@ const times = n => n === 1 ? 'פעם אחת' : n + ' פעמים';
 const qtyTxt = e => e.qty == null ? 'כמות לא כתובה' : (e.qty === 1 ? 'מנה אחת' : e.qty + ' מנות');
 function conn(t, warn) { const c = $('conn'); c.textContent = t; c.className = 'hint' + (warn ? ' warn' : ''); }
 function show(id) { ['s-login', 's-denied', 's-app'].forEach(s => { $(s).hidden = s !== id; }); $('tabs').hidden = id !== 's-app'; }
-function setLocked(v) { locked = v; ['q-med', 'q-vomit', 'q-head', 'q-other', 'rsave', 'qsave'].forEach(i => { $(i).disabled = v; }); }
+function setLocked(v) { locked = v; ['q-med', 'q-vomit', 'q-head', 'q-other', 'rsave', 'qsave', 'dfile'].forEach(i => { $(i).disabled = v; }); $('dpick').hidden = v; }
 
 /* ---------- backend ---------- */
 async function firebaseBackend() {
@@ -248,6 +271,10 @@ async function firebaseBackend() {
     set: (c, id, data) => F.setDoc(F.doc(db, c, id), data),
     update: (c, id, data) => F.updateDoc(F.doc(db, c, id), data),
     del: (c, id) => F.deleteDoc(F.doc(db, c, id)),
+    newId: c => F.doc(F.collection(db, c)).id,
+    setPath: (path, data) => F.setDoc(F.doc(db, path), data),
+    delPath: path => F.deleteDoc(F.doc(db, path)),
+    list: async (path, order) => (await F.getDocs(F.query(F.collection(db, path), F.orderBy(order)))).docs.map(d => Object.assign({ id: d.id }, d.data())),
   };
 }
 
@@ -270,7 +297,7 @@ $('logout2').onclick = () => B.signOut();
 let unsub = [];
 async function onUser(u) {
   unsub.forEach(f => { try { f(); } catch (_) {} }); unsub = [];
-  me = u; role = null; events = []; reports = []; members = [];
+  me = u; role = null; events = []; reports = []; members = []; docs = []; staged = [];
   if (!u) { show('s-login'); return; }
   try { role = ((await B.get('members', u.email)) || {}).role || null; } catch (e) { role = null; }
   // First entry of the owner: the access rules let only the owner create their own record.
@@ -284,6 +311,7 @@ async function onUser(u) {
   unsub.push(B.watch('events', 'ts', l => { events = l; if (!editing) renderSummary(); }, bad));
   unsub.push(B.watch('reports', 'ts', l => { reports = l; renderReports(); }, bad));
   unsub.push(B.watch('members', null, l => { members = l; renderMembers(); }, bad));
+  unsub.push(B.watch('documents', 'docTs', l => { docs = l; renderDocs(); }, bad));
   unsub.push(B.watch('settings', null, l => { const c = l.find(x => x.id === 'case'); caseName = (c && c.name) || ''; $('casename').textContent = caseName || 'התיק הרפואי'; $('case-input').value = caseName; renderSummary(); }, bad));
 }
 
@@ -440,7 +468,125 @@ $('imp-file').onchange = async ev => {
   ev.target.value = '';
 };
 
-renderSummary(); renderReports();
+
+/* ---------- documents ---------- */
+const DKINDS = { visit: 'סיכום ביקור', result: 'תוצאות בדיקה', letter: 'מכתב או הפניה', rx: 'מרשם', approval: 'אישור או טופס', other: 'אחר' };
+const MAX_MB = 20, CHUNK = 700000;
+let staged = [], uploading = false;
+const mb = n => (n / 1048576).toFixed(n < 1048576 ? 2 : 1) + ' MB';
+function guessKind(n) { n = n.toLowerCase(); if (/סיכום|ביקור|visit/.test(n)) return 'visit'; if (/בדיק|תוצא|result|lab|imaging|mri|דם/.test(n)) return 'result'; if (/מרשם|rx/.test(n)) return 'rx'; if (/טופס|אישור|17/.test(n)) return 'approval'; if (/מכתב|הפני/.test(n)) return 'letter'; return 'other'; }
+function kindSelect(id, val) { const s = el('select'); s.id = id; Object.entries(DKINDS).forEach(([k, v]) => { const o = el('option', null, v); o.value = k; if (k === val) o.selected = true; s.appendChild(o); }); return s; }
+function field(labelTxt, input) { const w = el('div'), l = el('label', 'lbl', labelTxt); l.htmlFor = input.id; w.appendChild(l); w.appendChild(input); return w; }
+
+$('dfile').onchange = ev => {
+  const bad = [];
+  Array.from(ev.target.files || []).forEach(f => {
+    if (f.size > MAX_MB * 1048576) { bad.push(f.name); return; }
+    if (!(f.type === 'application/pdf' || /^image\//.test(f.type) || /\.pdf$/i.test(f.name))) { bad.push(f.name); return; }
+    staged.push({ key: 's' + Date.now() + Math.random().toString(36).slice(2, 6), file: f, title: f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(), kind: guessKind(f.name), date: '' });
+  });
+  $('dmsg').textContent = bad.length ? 'לא נוספו (גדול מ-' + MAX_MB + ' MB, או לא PDF ולא תמונה): ' + bad.join(', ') : '';
+  ev.target.value = ''; renderStage();
+};
+function renderStage() {
+  const S = $('dstage'); S.innerHTML = '';
+  staged.forEach(it => {
+    const c = el('div', 'card'); c.appendChild(el('div', 'fname', it.file.name + ' · ' + mb(it.file.size)));
+    const t = el('input'); t.type = 'text'; t.id = it.key + 't'; t.value = it.title; t.oninput = () => { it.title = t.value; };
+    c.appendChild(field('שם המסמך', t));
+    const g = el('div', 'grid2'), k = kindSelect(it.key + 'k', it.kind); k.onchange = () => { it.kind = k.value; };
+    const d = el('input'); d.type = 'date'; d.id = it.key + 'd'; d.value = it.date; d.oninput = () => { it.date = d.value; }; d.onchange = d.oninput;
+    g.appendChild(field('סוג', k)); g.appendChild(field('תאריך המסמך', d)); c.appendChild(g);
+    const rm = el('button', 'mini danger', 'הסרה מהרשימה'); rm.onclick = () => { staged = staged.filter(x => x !== it); renderStage(); }; c.appendChild(rm);
+    S.appendChild(c);
+  });
+  $('dupload').hidden = !staged.length || locked;
+  if (staged.length) $('dupload').textContent = staged.length === 1 ? 'העלאת המסמך' : 'העלאת ' + staged.length + ' המסמכים';
+}
+function readDataURL(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(r.error); r.readAsDataURL(blob); }); }
+async function shrinkImage(file) {
+  try {
+    const url = URL.createObjectURL(file), img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+    const max = 2200, sc = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * sc); cv.height = Math.round(img.naturalHeight * sc);
+    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+    const out = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.85));
+    return out && out.size < file.size ? { blob: out, mime: 'image/jpeg' } : { blob: file, mime: file.type || 'image/jpeg' };
+  } catch (e) { return { blob: file, mime: file.type || 'image/jpeg' }; }
+}
+$('dupload').onclick = async () => {
+  if (uploading || locked) return;
+  if (staged.some(it => !it.date || !it.title.trim())) { $('dmsg').textContent = 'לכל מסמך צריך שם ותאריך. התאריך הוא של המסמך עצמו, לא של היום.'; return; }
+  uploading = true; $('dupload').disabled = true; let done = 0; const failed = [], total = staged.length;
+  for (const it of staged.slice()) {
+    $('dmsg').textContent = 'מעלה ' + (done + failed.length + 1) + ' מתוך ' + total + '…';
+    let id = null;
+    try {
+      const isImg = /^image\//.test(it.file.type);
+      const prep = isImg ? await shrinkImage(it.file) : { blob: it.file, mime: 'application/pdf' };
+      const b64 = (await readDataURL(prep.blob)).split(',')[1] || '';
+      const parts = []; for (let i = 0; i < b64.length; i += CHUNK) parts.push(b64.slice(i, i + CHUNK));
+      id = B.newId('documents');
+      await B.set('documents', id, { title: it.title.trim().slice(0, 120), kind: it.kind, docDate: it.date, docTs: new Date(it.date + 'T12:00').getTime(), fileName: it.file.name.slice(0, 200), mime: prep.mime, size: prep.blob.size, parts: parts.length, status: 'uploading', extract: 'pending', by: me.email, byName: me.name, at: iso(new Date()) });
+      for (let i = 0; i < parts.length; i++) await B.setPath('documents/' + id + '/chunks/' + i, { i, d: parts[i] });
+      await B.update('documents', id, { status: 'ready' });
+      staged = staged.filter(x => x !== it); done++;
+    } catch (e) { failed.push(it.file.name); if (id) { try { await B.update('documents', id, { status: 'failed' }); } catch (_) {} } }
+  }
+  uploading = false; $('dupload').disabled = false; renderStage();
+  $('dmsg').textContent = (done ? 'הועלו ' + done + ' מסמכים. ' : '') + (failed.length ? 'לא הועלו: ' + failed.join(', ') + '. בדקו את החיבור ונסו שוב.' : '');
+};
+async function openDoc(d, btn) {
+  btn.disabled = true; btn.textContent = 'טוען…';
+  try {
+    const parts = await B.list('documents/' + d.id + '/chunks', 'i');
+    if (parts.length !== d.parts) throw new Error('missing');
+    const bin = atob(parts.map(p => p.d).join('')), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([arr], { type: d.mime || 'application/pdf' }));
+    const a = el('a', 'openlink', 'הצגת המסמך'); a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    btn.replaceWith(a);
+  } catch (e) { btn.disabled = false; btn.textContent = 'הטעינה נכשלה. לנסות שוב'; }
+}
+function docEdit(d, card) {
+  if (card.querySelector('.eform')) return;
+  const f = el('div', 'eform'), u = 'e' + d.id;
+  const t = el('input'); t.type = 'text'; t.id = u + 't'; t.value = d.title || ''; f.appendChild(field('שם המסמך', t));
+  const g = el('div', 'grid2'), k = kindSelect(u + 'k', d.kind), dt = el('input'); dt.type = 'date'; dt.id = u + 'd'; dt.value = d.docDate || '';
+  g.appendChild(field('סוג', k)); g.appendChild(field('תאריך המסמך', dt)); f.appendChild(g);
+  const er = el('div', 'why'); er.setAttribute('role', 'status'); f.appendChild(er);
+  const b = el('button', 'btn', 'שמירה'); b.onclick = async () => {
+    if (!t.value.trim() || !dt.value) { er.textContent = 'צריך שם ותאריך.'; return; }
+    b.disabled = true; try { await B.update('documents', d.id, { title: t.value.trim().slice(0, 120), kind: k.value, docDate: dt.value, docTs: new Date(dt.value + 'T12:00').getTime() }); } catch (_) { er.textContent = 'השמירה נכשלה.'; b.disabled = false; } };
+  const x = el('button', 'btn alt', 'ביטול'); x.onclick = () => f.remove(); f.appendChild(b); f.appendChild(x); card.appendChild(f);
+}
+async function deleteDoc(d, btn) {
+  try { for (let i = 0; i < (d.parts || 0); i++) await B.delPath('documents/' + d.id + '/chunks/' + i); await B.del('documents', d.id); }
+  catch (e) { btn.textContent = 'המחיקה נכשלה. נסו שוב'; }
+}
+function renderDocs() {
+  const L = $('dlist'); L.innerHTML = '';
+  if (!docs.length) { L.appendChild(el('div', 'empty', 'עוד אין מסמכים בתיק. המסמך הראשון שתעלו יופיע כאן, אצל כל מי שמורשה.')); return; }
+  docs.forEach(d => {
+    const c = el('div', 'card'), m = el('div', 'meta'), dd = d.docDate ? new Date(d.docDate + 'T12:00') : null;
+    m.appendChild(el('b', null, dd ? dm(dd) + '.' + String(dd.getFullYear()).slice(2) : 'בלי תאריך'));
+    m.appendChild(el('span', 'tag t-o', DKINDS[d.kind] || 'אחר'));
+    if (d.status === 'uploading') m.appendChild(el('span', 'tag t-w', 'בהעלאה'));
+    else if (d.status === 'failed') m.appendChild(el('span', 'tag t-d', 'ההעלאה נכשלה'));
+    m.appendChild(el('span', 'who', (d.byName || d.by || '') + (d.size ? ' · ' + mb(d.size) : '')));
+    c.appendChild(m); c.appendChild(el('div', 'doc-t', d.title || d.fileName || 'מסמך'));
+    const box = el('div');
+    if (d.status === 'ready') { const o = el('button', 'mini', 'פתיחה'); o.onclick = () => openDoc(d, o); box.appendChild(o); }
+    if (!locked) {
+      const e = el('button', 'mini', 'עריכת פרטים'); e.onclick = () => docEdit(d, c); box.appendChild(e);
+      const del = el('button', 'mini danger', 'מחיקה'); twoStep(del, 'מחיקה', () => deleteDoc(d, del)); box.appendChild(del);
+    }
+    c.appendChild(box); L.appendChild(c);
+  });
+}
+
+renderSummary(); renderReports(); renderDocs();
 boot();
 
 </script>
