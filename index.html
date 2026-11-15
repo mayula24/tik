@@ -73,6 +73,18 @@ pre.out{white-space:pre-wrap;font-family:inherit;font-size:13.5px;background:var
 .tabs div{display:flex;width:100%;max-width:560px}
 .tab{flex:1;font:inherit;font-size:13.5px;font-weight:600;color:var(--soft);background:none;border:0;border-radius:10px;cursor:pointer;padding:11px 0}
 .tab.on{color:var(--thread);background:var(--thread-bg)}
+.task{display:flex;gap:10px;align-items:flex-start}
+.task .tx{flex:1;min-width:0}
+.task .tt{font-weight:600;font-size:15px;overflow-wrap:anywhere}
+.task.done .tt{text-decoration:line-through;color:var(--soft)}
+.q{font-size:13.5px;color:var(--soft);margin:4px 0 0;overflow-wrap:anywhere}
+.chk{flex:none;width:26px;height:26px;border-radius:8px;border:2px solid var(--thread);background:var(--paper);cursor:pointer;margin-top:2px;font:inherit;color:var(--thread);font-weight:700;line-height:1}
+.chk[aria-pressed="true"]{background:var(--thread);color:var(--paper)}
+.chk:disabled{opacity:.5;cursor:default}
+details.recs{margin:6px 0 0;font-size:14px}details.recs summary{cursor:pointer;color:var(--thread);font-weight:600;font-size:13.5px}
+details.recs ol{margin:6px 0 0;padding:0 18px 0 0}details.recs li{margin:0 0 4px;overflow-wrap:anywhere}
+.dsum{font-size:14px;margin:6px 0 0;overflow-wrap:anywhere}
+.card.hl{outline:2px solid var(--thread)}
 .foot{font-size:12.5px;color:var(--soft);margin-top:16px}
 @media (prefers-reduced-motion: no-preference){.view.on{animation:fade .2s ease}@keyframes fade{from{opacity:.4}to{opacity:1}}}
 
@@ -158,6 +170,12 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
       <div id="recent"></div>
     </section>
 
+    <section class="view" id="v-tasks">
+      <div class="sec" style="margin-top:14px">מה פתוח עכשיו</div>
+      <p class="hint" style="margin:0 0 10px">משימות שחולצו מהמסמכים. לכל משימה רשום מאיזה מסמך היא באה, עם הציטוט המקורי.</p>
+      <div id="tlist"></div>
+    </section>
+
     <section class="view" id="v-summary">
       <div class="sec" style="margin-top:14px">סיכום תקופה</div>
       <div class="chips" id="sumwin">
@@ -205,8 +223,8 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
         <div class="row2"><input type="text" id="case-input" autocomplete="off" placeholder="השם שיופיע בראש המסך" aria-label="שם התיק"><button class="btn" id="case-save">שמירה</button></div>
         <p class="hint" id="case-msg" role="status"></p>
 
-        <div class="sec">ייבוא אירועים מקובץ</div>
-        <p class="hint" style="margin:0 0 8px">לייבוא חד-פעמי של היסטוריה, למשל מהיומן בוואטסאפ.</p>
+        <div class="sec">ייבוא מקובץ</div>
+        <p class="hint" style="margin:0 0 8px">קובץ שהוכן במיוחד: היסטוריה מהיומן בוואטסאפ, או פרטים ומשימות שחולצו ממסמכים.</p>
         <input type="file" id="imp-file" accept="application/json,.json" aria-label="קובץ ייבוא">
         <p class="hint" id="imp-msg" role="status"></p>
       </div>
@@ -219,6 +237,7 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
 
 <nav class="tabs" id="tabs" aria-label="ניווט" hidden><div>
   <button class="tab on" data-v="report">דיווח</button>
+  <button class="tab" data-v="tasks">לטיפול</button>
   <button class="tab" data-v="summary">סיכום</button>
   <button class="tab" data-v="log">יומן</button>
   <button class="tab" data-v="docs">מסמכים</button>
@@ -238,7 +257,7 @@ const firebaseConfig = {
 const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
 
 let B = null, me = null, role = null, locked = true;
-let events = [], reports = [], members = [], docs = [], caseName = '';
+let events = [], reports = [], members = [], docs = [], tasks = [], caseName = '';
 let sumHours = 24, sumText = '', editing = 0;
 const DRUGS = ['אקמול', 'נורופן', 'אופטלגין'];
 const ROLES = { admin: 'מנהל', reporter: 'מדווח', viewer: 'צפייה בלבד' };
@@ -297,7 +316,7 @@ $('logout2').onclick = () => B.signOut();
 let unsub = [];
 async function onUser(u) {
   unsub.forEach(f => { try { f(); } catch (_) {} }); unsub = [];
-  me = u; role = null; events = []; reports = []; members = []; docs = []; staged = [];
+  me = u; role = null; events = []; reports = []; members = []; docs = []; tasks = []; staged = [];
   if (!u) { show('s-login'); return; }
   try { role = ((await B.get('members', u.email)) || {}).role || null; } catch (e) { role = null; }
   // First entry of the owner: the access rules let only the owner create their own record.
@@ -311,7 +330,8 @@ async function onUser(u) {
   unsub.push(B.watch('events', 'ts', l => { events = l; if (!editing) renderSummary(); }, bad));
   unsub.push(B.watch('reports', 'ts', l => { reports = l; renderReports(); }, bad));
   unsub.push(B.watch('members', null, l => { members = l; renderMembers(); }, bad));
-  unsub.push(B.watch('documents', 'docTs', l => { docs = l; renderDocs(); }, bad));
+  unsub.push(B.watch('documents', 'docTs', l => { docs = l; renderDocs(); renderTasks(); }, bad));
+  unsub.push(B.watch('tasks', null, l => { tasks = l; renderTasks(); }, bad));
   unsub.push(B.watch('settings', null, l => { const c = l.find(x => x.id === 'case'); caseName = (c && c.name) || ''; $('casename').textContent = caseName || 'התיק הרפואי'; $('case-input').value = caseName; renderSummary(); }, bad));
 }
 
@@ -461,13 +481,74 @@ $('case-save').onclick = async () => { const v = $('case-input').value.trim().sl
 /* ---------- import (admin) ---------- */
 $('imp-file').onchange = async ev => {
   const f = ev.target.files[0], msg = $('imp-msg'); if (!f) return;
-  try { const arr = JSON.parse(await f.text()); if (!Array.isArray(arr)) throw 0; let n = 0;
+  let parsed; try { parsed = JSON.parse(await f.text()); } catch (e) { parsed = null; }
+  if (parsed && parsed.type === 'tik-extract') { msg.textContent = 'מייבא…'; try { msg.textContent = await importExtract(parsed); } catch (e) { msg.textContent = 'הייבוא נעצר באמצע. אפשר להריץ שוב את אותו קובץ, זה לא ייצור כפילויות.'; } ev.target.value = ''; return; }
+  try { const arr = parsed; if (!Array.isArray(arr)) throw 0; let n = 0;
     for (const w of arr) { if (!w || !w.doc_id || !w.data || typeof w.data.ts !== 'number') continue; await B.set('events', String(w.doc_id), w.data); n++; }
     msg.textContent = 'יובאו ' + n + ' אירועים. הם מופיעים בסיכום.'; }
   catch (e) { msg.textContent = 'הקובץ לא נקרא. צריך את קובץ הייבוא שהוכן במיוחד (JSON).'; }
   ev.target.value = '';
 };
 
+
+const dayMs = 86400000, tsOf = ds => new Date(ds + 'T12:00').getTime();
+// Matches each extracted document to the uploaded file it came from (same date, or within two days), or keeps a record without a file until it is uploaded.
+async function importExtract(x) {
+  const used = new Set(), map = {}; let linked = 0, created = 0, nt = 0;
+  for (const e of x.docs || []) {
+    if (!e || !e.key || !/^\d{4}-\d{2}-\d{2}$/.test(e.docDate || '')) continue;
+    let d = docs.find(z => z.extractKey === e.key);
+    if (!d) { const free = docs.filter(z => !z.extractKey && !used.has(z.id) && z.status !== 'nofile');
+      const t = tsOf(e.docDate), hits = (e.hints || []).concat(e.docDate);
+      d = free.find(z => z.docDate === e.docDate) || free.find(z => hits.some(h => (z.fileName || '').includes(h))) ||
+          free.find(z => z.docDate && Math.abs(tsOf(z.docDate) - t) <= 2 * dayMs && (z.kind === e.kind || z.kind === 'other')); }
+    const fields = { extractKey: e.key, title: String(e.title || '').slice(0, 120), kind: e.kind || 'visit', docDate: e.docDate, docTs: tsOf(e.docDate), dateFrom: 'extract',
+      unit: e.unit || '', doctor: e.doctor || '', summary: e.summary || '', recs: (e.recs || []).slice(0, 30), extract: 'done', extractedAt: x.made || '' };
+    if (d) { await B.update('documents', d.id, fields); used.add(d.id); map[e.key] = d.id; if (d.status === 'nofile') created++; else linked++; }
+    else { const id = 'x-' + e.key; await B.set('documents', id, Object.assign({ status: 'nofile', parts: 0, by: me.email, byName: me.name, at: iso(new Date()) }, fields)); map[e.key] = id; created++; }
+  }
+  for (const t of x.tasks || []) {
+    if (!t || !t.id || !t.text) continue;
+    const old = tasks.find(z => z.id === t.id), src = (x.docs || []).find(e => e.key === t.src) || {};
+    await B.set('tasks', String(t.id), { text: t.text, quote: t.quote || '', due: t.due || '', flag: !!t.flag, srcKey: t.src || '', srcDoc: map[t.src] || '',
+      srcTitle: src.unit || '', srcDate: src.docDate || '', status: old ? old.status : (t.status === 'done' ? 'done' : 'open'), doneBy: old ? (old.doneBy || '') : '', at: old ? old.at : iso(new Date()) }); nt++;
+  }
+  return 'עודכנו ' + linked + ' מסמכים שכבר היו בתיק' + (created ? ', ונוספו ' + created + ' שהקובץ שלהם עוד לא הועלה' : '') + '. ' + nt + ' משימות בלשונית "לטיפול".';
+}
+function renderTasks() {
+  const L = $('tlist'); if (!L) return; L.innerHTML = '';
+  if (!tasks.length) { L.appendChild(el('div', 'empty', 'אין עדיין משימות. הן נוספות כשמייבאים קובץ חילוץ של מסמכים.')); return; }
+  const today = new Date(); today.setHours(0, 0, 0, 0); const soon = today.getTime() + 45 * dayMs;
+  const open = tasks.filter(t => t.status !== 'done'), done = tasks.filter(t => t.status === 'done');
+  const byDue = (a, b) => (a.due || '0').localeCompare(b.due || '0');
+  const groups = [
+    ['לבירור', open.filter(t => t.flag)],
+    ['פתוח עכשיו', open.filter(t => !t.flag && (!t.due || tsOf(t.due) <= soon)).sort(byDue)],
+    ['בהמשך', open.filter(t => !t.flag && t.due && tsOf(t.due) > soon).sort(byDue)],
+  ];
+  groups.forEach(([name, list]) => { if (!list.length) return; L.appendChild(el('div', 'sec', name + ' · ' + list.length)); list.forEach(t => L.appendChild(taskCard(t, today))); });
+  if (done.length) { const det = el('details', 'recs'); det.appendChild(el('summary', null, 'בוצע · ' + done.length)); done.forEach(t => det.appendChild(taskCard(t, today))); L.appendChild(det); }
+}
+function taskCard(t, today) {
+  const c = el('div', 'card task' + (t.status === 'done' ? ' done' : '')), b = el('button', 'chk', t.status === 'done' ? '✓' : '');
+  b.setAttribute('aria-pressed', t.status === 'done' ? 'true' : 'false'); b.setAttribute('aria-label', t.status === 'done' ? 'להחזיר לפתוח' : 'סימון שבוצע'); b.disabled = locked;
+  b.onclick = () => { b.disabled = true; B.update('tasks', t.id, t.status === 'done' ? { status: 'open', doneBy: '', doneAt: '' } : { status: 'done', doneBy: me.name || me.email, doneAt: iso(new Date()) }).catch(() => { b.disabled = false; }); };
+  const tx = el('div', 'tx'); tx.appendChild(el('div', 'tt', t.text));
+  const m = el('div', 'meta'); m.style.margin = '4px 0 0';
+  if (t.due) { const dd = new Date(t.due + 'T12:00'); m.appendChild(el('span', 'tag ' + (dd < today && t.status !== 'done' ? 't-d' : 't-o'), (dd < today ? 'היה אמור ב-' : 'בערך ב-') + dm(dd) + '.' + String(dd.getFullYear()).slice(2))); }
+  if (t.flag) m.appendChild(el('span', 'tag t-w', 'סימון שלי לבירור, לא הוראה רפואית'));
+  if (t.status === 'done' && t.doneBy) m.appendChild(el('span', 'who', 'סומן ע"י ' + t.doneBy));
+  if (m.childNodes.length) tx.appendChild(m);
+  if (t.quote) tx.appendChild(el('p', 'q', 'במסמך: "' + t.quote + '"'));
+  if (t.srcDoc) { const sd = t.srcDate ? new Date(t.srcDate + 'T12:00') : null; const a = el('button', 'mini', 'מקור: ' + (t.srcTitle || 'מסמך') + (sd ? ' · ' + dm(sd) + '.' + String(sd.getFullYear()).slice(2) : ''));
+    a.style.margin = '2px 0 0'; a.onclick = () => goDoc(t.srcDoc); tx.appendChild(a); }
+  c.appendChild(b); c.appendChild(tx); return c;
+}
+function goDoc(id) {
+  document.querySelector('.tab[data-v="docs"]').click();
+  const c = document.getElementById('doc-' + id); if (!c) return;
+  c.scrollIntoView({ block: 'center' }); c.classList.add('hl'); setTimeout(() => c.classList.remove('hl'), 2500);
+}
 
 /* ---------- documents ---------- */
 const DKINDS = { visit: 'סיכום ביקור', result: 'תוצאות בדיקה', letter: 'מכתב או הפניה', rx: 'מרשם', approval: 'אישור או טופס', other: 'אחר' };
@@ -483,7 +564,11 @@ $('dfile').onchange = ev => {
   Array.from(ev.target.files || []).forEach(f => {
     if (f.size > MAX_MB * 1048576) { bad.push(f.name); return; }
     if (!(f.type === 'application/pdf' || /^image\//.test(f.type) || /\.pdf$/i.test(f.name))) { bad.push(f.name); return; }
-    staged.push({ key: 's' + Date.now() + Math.random().toString(36).slice(2, 6), file: f, title: f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(), kind: guessKind(f.name), date: '' });
+    const it = { key: 's' + Date.now() + Math.random().toString(36).slice(2, 6), file: f, title: f.name.replace(/\.[^.]+$/, '').replace(/^\d{4}-\d{2}-\d{2}\s*/, '').replace(/[_]+/g, ' ').trim() || f.name, kind: guessKind(f.name), date: '', dateFrom: '' };
+    const fm = f.name.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (fm) { it.date = fm[1] + '-' + fm[2] + '-' + fm[3]; it.dateFrom = 'name'; }
+    staged.push(it);
+    if (!it.date && /pdf/i.test(f.type + f.name)) detectDate(it);
   });
   $('dmsg').textContent = bad.length ? 'לא נוספו (גדול מ-' + MAX_MB + ' MB, או לא PDF ולא תמונה): ' + bad.join(', ') : '';
   ev.target.value = ''; renderStage();
@@ -497,11 +582,43 @@ function renderStage() {
     const g = el('div', 'grid2'), k = kindSelect(it.key + 'k', it.kind); k.onchange = () => { it.kind = k.value; };
     const d = el('input'); d.type = 'date'; d.id = it.key + 'd'; d.value = it.date; d.oninput = () => { it.date = d.value; }; d.onchange = d.oninput;
     g.appendChild(field('סוג', k)); g.appendChild(field('תאריך המסמך', d)); c.appendChild(g);
+    c.appendChild(el('div', 'hint', it.dateFrom === 'name' ? 'התאריך נלקח משם הקובץ.' : it.dateFrom === 'pdf' ? 'התאריך זוהה מתוך המסמך. אפשר לתקן.' : it.dateFrom === 'reading' ? 'מחפש תאריך בתוך המסמך…' : 'לא חובה. אם לא זוהה תאריך, המסמך יישמר ויסומן להשלמה.'));
     const rm = el('button', 'mini danger', 'הסרה מהרשימה'); rm.onclick = () => { staged = staged.filter(x => x !== it); renderStage(); }; c.appendChild(rm);
     S.appendChild(c);
   });
   $('dupload').hidden = !staged.length || locked;
   if (staged.length) $('dupload').textContent = staged.length === 1 ? 'העלאת המסמך' : 'העלאת ' + staged.length + ' המסמכים';
+}
+let pdfjsReady = null;
+function loadPdfJs() {
+  if (pdfjsReady) return pdfjsReady;
+  pdfjsReady = new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    sc.onload = () => { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; res(window.pdfjsLib); } catch (e) { rej(e); } };
+    sc.onerror = rej; document.head.appendChild(sc); });
+  return pdfjsReady;
+}
+function latestDate(text) {
+  const now = Date.now() + 86400000, count = {}, first = {}; let i = 0;
+  const re = /(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4}|\d{2})(?!\d)/g; let m;
+  while ((m = re.exec(text))) {
+    let d = +m[1], mo = +m[2], y = +m[3]; if (y < 100) y += 2000;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || y < 2005) continue;
+    const dt = new Date(y, mo - 1, d, 12); if (dt.getMonth() !== mo - 1 || dt.getTime() > now) continue;
+    const k = y + '-' + z2(mo) + '-' + z2(d); count[k] = (count[k] || 0) + 1; if (!(k in first)) first[k] = i++;
+  }
+  // The date the document repeats most is its own date (header, signature, visit line). Ties go to the one written first.
+  const keys = Object.keys(count).sort((a, b) => count[b] - count[a] || first[a] - first[b]);
+  return keys[0] || '';
+}
+async function detectDate(it) {
+  it.dateFrom = 'reading'; renderStage();
+  try {
+    const lib = await loadPdfJs(); const pdf = await lib.getDocument({ data: await it.file.arrayBuffer() }).promise; let text = '';
+    for (let i = 1; i <= Math.min(pdf.numPages, 12); i++) { const pg = await pdf.getPage(i); const tc = await pg.getTextContent(); text += tc.items.map(x => x.str).join(' ') + '\n'; }
+    const found = latestDate(text);
+    if (!it.date) { it.date = found; it.dateFrom = found ? 'pdf' : ''; }
+  } catch (e) { if (!it.date) it.dateFrom = ''; }
+  if (staged.includes(it)) renderStage();
 }
 function readDataURL(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(r.error); r.readAsDataURL(blob); }); }
 async function shrinkImage(file) {
@@ -517,7 +634,6 @@ async function shrinkImage(file) {
 }
 $('dupload').onclick = async () => {
   if (uploading || locked) return;
-  if (staged.some(it => !it.date || !it.title.trim())) { $('dmsg').textContent = 'לכל מסמך צריך שם ותאריך. התאריך הוא של המסמך עצמו, לא של היום.'; return; }
   uploading = true; $('dupload').disabled = true; let done = 0; const failed = [], total = staged.length;
   for (const it of staged.slice()) {
     $('dmsg').textContent = 'מעלה ' + (done + failed.length + 1) + ' מתוך ' + total + '…';
@@ -527,12 +643,21 @@ $('dupload').onclick = async () => {
       const prep = isImg ? await shrinkImage(it.file) : { blob: it.file, mime: 'application/pdf' };
       const b64 = (await readDataURL(prep.blob)).split(',')[1] || '';
       const parts = []; for (let i = 0; i < b64.length; i += CHUNK) parts.push(b64.slice(i, i + CHUNK));
+      const waiting = it.date && docs.find(z => z.status === 'nofile' && z.docDate === it.date);
+      if (waiting) {
+        id = waiting.id;
+        await B.update('documents', id, { fileName: it.file.name.slice(0, 200), mime: prep.mime, size: prep.blob.size, parts: parts.length, status: 'uploading', by: me.email, byName: me.name, at: iso(new Date()) });
+        for (let i = 0; i < parts.length; i++) await B.setPath('documents/' + id + '/chunks/' + i, { i, d: parts[i] });
+        await B.update('documents', id, { status: 'ready' });
+        staged = staged.filter(x => x !== it); done++; continue;
+      }
       id = B.newId('documents');
-      await B.set('documents', id, { title: it.title.trim().slice(0, 120), kind: it.kind, docDate: it.date, docTs: new Date(it.date + 'T12:00').getTime(), fileName: it.file.name.slice(0, 200), mime: prep.mime, size: prep.blob.size, parts: parts.length, status: 'uploading', extract: 'pending', by: me.email, byName: me.name, at: iso(new Date()) });
+      const hasDate = /^\d{4}-\d{2}-\d{2}$/.test(it.date || '');
+      await B.set('documents', id, { title: (it.title.trim() || it.file.name).slice(0, 120), kind: it.kind, docDate: hasDate ? it.date : '', docTs: hasDate ? new Date(it.date + 'T12:00').getTime() : Date.now(), dateFrom: hasDate ? (it.dateFrom || 'manual') : '', fileName: it.file.name.slice(0, 200), mime: prep.mime, size: prep.blob.size, parts: parts.length, status: 'uploading', extract: 'pending', by: me.email, byName: me.name, at: iso(new Date()) });
       for (let i = 0; i < parts.length; i++) await B.setPath('documents/' + id + '/chunks/' + i, { i, d: parts[i] });
       await B.update('documents', id, { status: 'ready' });
       staged = staged.filter(x => x !== it); done++;
-    } catch (e) { failed.push(it.file.name); if (id) { try { await B.update('documents', id, { status: 'failed' }); } catch (_) {} } }
+    } catch (e) { failed.push(it.file.name); if (id) { try { await B.update('documents', id, { status: id.startsWith('x-') ? 'nofile' : 'failed' }); } catch (_) {} } }
   }
   uploading = false; $('dupload').disabled = false; renderStage();
   $('dmsg').textContent = (done ? 'הועלו ' + done + ' מסמכים. ' : '') + (failed.length ? 'לא הועלו: ' + failed.join(', ') + '. בדקו את החיבור ונסו שוב.' : '');
@@ -557,8 +682,10 @@ function docEdit(d, card) {
   g.appendChild(field('סוג', k)); g.appendChild(field('תאריך המסמך', dt)); f.appendChild(g);
   const er = el('div', 'why'); er.setAttribute('role', 'status'); f.appendChild(er);
   const b = el('button', 'btn', 'שמירה'); b.onclick = async () => {
-    if (!t.value.trim() || !dt.value) { er.textContent = 'צריך שם ותאריך.'; return; }
-    b.disabled = true; try { await B.update('documents', d.id, { title: t.value.trim().slice(0, 120), kind: k.value, docDate: dt.value, docTs: new Date(dt.value + 'T12:00').getTime() }); } catch (_) { er.textContent = 'השמירה נכשלה.'; b.disabled = false; } };
+    if (!t.value.trim()) { er.textContent = 'צריך שם למסמך.'; return; }
+    const upd = { title: t.value.trim().slice(0, 120), kind: k.value };
+    if (dt.value) { upd.docDate = dt.value; upd.docTs = new Date(dt.value + 'T12:00').getTime(); upd.dateFrom = 'manual'; }
+    b.disabled = true; try { await B.update('documents', d.id, upd); } catch (_) { er.textContent = 'השמירה נכשלה.'; b.disabled = false; } };
   const x = el('button', 'btn alt', 'ביטול'); x.onclick = () => f.remove(); f.appendChild(b); f.appendChild(x); card.appendChild(f);
 }
 async function deleteDoc(d, btn) {
@@ -569,13 +696,20 @@ function renderDocs() {
   const L = $('dlist'); L.innerHTML = '';
   if (!docs.length) { L.appendChild(el('div', 'empty', 'עוד אין מסמכים בתיק. המסמך הראשון שתעלו יופיע כאן, אצל כל מי שמורשה.')); return; }
   docs.forEach(d => {
-    const c = el('div', 'card'), m = el('div', 'meta'), dd = d.docDate ? new Date(d.docDate + 'T12:00') : null;
-    m.appendChild(el('b', null, dd ? dm(dd) + '.' + String(dd.getFullYear()).slice(2) : 'בלי תאריך'));
+    const c = el('div', 'card'), m = el('div', 'meta'), dd = d.docDate ? new Date(d.docDate + 'T12:00') : null; c.id = 'doc-' + d.id;
+    m.appendChild(el('b', null, dd ? dm(dd) + '.' + String(dd.getFullYear()).slice(2) : 'הועלה ' + dm(new Date(d.docTs || Date.now()))));
+    if (!dd) m.appendChild(el('span', 'tag t-w', 'תאריך המסמך יושלם'));
+    else if (d.dateFrom === 'pdf' || d.dateFrom === 'extract') m.appendChild(el('span', 'tag t-c', 'תאריך זוהה אוטומטית'));
     m.appendChild(el('span', 'tag t-o', DKINDS[d.kind] || 'אחר'));
     if (d.status === 'uploading') m.appendChild(el('span', 'tag t-w', 'בהעלאה'));
     else if (d.status === 'failed') m.appendChild(el('span', 'tag t-d', 'ההעלאה נכשלה'));
+    else if (d.status === 'nofile') m.appendChild(el('span', 'tag t-w', 'הקובץ עוד לא הועלה'));
     m.appendChild(el('span', 'who', (d.byName || d.by || '') + (d.size ? ' · ' + mb(d.size) : '')));
     c.appendChild(m); c.appendChild(el('div', 'doc-t', d.title || d.fileName || 'מסמך'));
+    if (d.unit || d.doctor) c.appendChild(el('div', 'who', [d.unit, d.doctor].filter(Boolean).join(' · ')));
+    if (d.summary) c.appendChild(el('p', 'dsum', d.summary));
+    if (d.recs && d.recs.length) { const det = el('details', 'recs'); det.appendChild(el('summary', null, 'המלצות מהמסמך (' + d.recs.length + ')')); const ol = el('ol'); d.recs.forEach(r => ol.appendChild(el('li', null, r))); det.appendChild(ol); c.appendChild(det); }
+    if (d.status === 'nofile') c.appendChild(el('p', 'hint', 'כשתעלו את הקובץ עם אותו תאריך, הוא יצורף לכאן לבד.'));
     const box = el('div');
     if (d.status === 'ready') { const o = el('button', 'mini', 'פתיחה'); o.onclick = () => openDoc(d, o); box.appendChild(o); }
     if (!locked) {
@@ -586,7 +720,7 @@ function renderDocs() {
   });
 }
 
-renderSummary(); renderReports(); renderDocs();
+renderSummary(); renderReports(); renderDocs(); renderTasks();
 boot();
 
 </script>
