@@ -132,7 +132,7 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
       <p class="hint" id="conn" role="status">מתחבר למאגר…</p>
     </header>
 
-    <section class="view on" id="v-report">
+    <section class="view" id="v-report" hidden>
       <div class="sec">דיווח מהיר, בלחיצה</div>
       <div class="quick">
         <button class="qb" id="q-med">ניתנה תרופה</button>
@@ -159,13 +159,6 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
       </div>
       <p class="hint" id="qmsg" role="status"></p>
 
-      <div class="sec">או בכתיבה חופשית</div>
-      <label class="lbl" for="rtext" style="margin-top:0">מה קרה?</label>
-      <textarea id="rtext" rows="4" placeholder="כותבים כמו בוואטסאפ. למשל: שוכב מהצהריים, לא רוצה לאכול"></textarea>
-      <p class="hint">התאריך, השעה ומי שכתב נרשמים לבד. להכתבה בקול אפשר להשתמש במיקרופון של המקלדת.</p>
-      <button class="btn" id="rsave">שמירת הדיווח</button>
-      <p class="hint" id="rmsg" role="status"></p>
-
       <div class="sec">דיווחים אחרונים</div>
       <div id="recent"></div>
     </section>
@@ -189,8 +182,15 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
       <p class="foot">הסיכום מציג כמה ניתן ומתי. הוא לא קובע אם כמות של תרופה בטוחה. את זה שואלים רופא או רוקח.</p>
     </section>
 
-    <section class="view" id="v-log">
-      <div class="sec" style="margin-top:14px">כל הדיווחים הכתובים</div>
+    <section class="view on" id="v-log">
+      <div class="sec" style="margin-top:14px">דיווח חדש</div>
+      <label class="lbl" for="rtext" style="margin-top:0">מה קרה?</label>
+      <textarea id="rtext" rows="4" placeholder="כותבים כמו בוואטסאפ. למשל: שוכב מהצהריים, לא רוצה לאכול"></textarea>
+      <p class="hint">התאריך, השעה ומי שכתב נרשמים לבד. להכתבה בקול אפשר להשתמש במיקרופון של המקלדת.</p>
+      <button class="btn" id="rsave">שמירת הדיווח</button>
+      <p class="hint" id="rmsg" role="status"></p>
+
+      <div class="sec">כל הדיווחים</div>
       <div id="log"></div>
     </section>
 
@@ -241,10 +241,9 @@ select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px sol
 </div>
 
 <nav class="tabs" id="tabs" aria-label="ניווט" hidden><div>
-  <button class="tab on" data-v="report">דיווח</button>
+  <button class="tab on" data-v="log">יומן</button>
   <button class="tab" data-v="tasks">לטיפול</button>
   <button class="tab" data-v="summary">סיכום</button>
-  <button class="tab" data-v="log">יומן</button>
   <button class="tab" data-v="docs">מסמכים</button>
   <button class="tab" data-v="users">משתמשים</button>
 </div></nav>
@@ -378,7 +377,7 @@ $('rsave').onclick = async () => {
   if (!txt) { msg.textContent = 'כתבו מה קרה, ואז שמרו.'; ta.focus(); return; }
   if (locked) return;
   const btn = $('rsave'), now = new Date(); btn.disabled = true;
-  try { await B.add('reports', { text: txt.slice(0, 4000), by: me.email, byName: me.name, at: iso(now), ts: now.getTime() }); ta.value = ''; msg.textContent = 'הדיווח נשמר ומופיע ביומן. כדי שתרופות והקאות ייספרו בסיכום, הוסיפו אותן גם בכפתורים המהירים.'; }
+  try { await B.add('reports', { text: txt.slice(0, 4000), by: me.email, byName: me.name, at: iso(now), ts: now.getTime() }); ta.value = ''; msg.textContent = 'הדיווח נשמר ומופיע למטה, אצל כל מי שמורשה.'; }
   catch (e) { msg.textContent = 'השמירה נכשלה. בדקו את החיבור ונסו שוב.'; }
   btn.disabled = false;
 };
